@@ -29,6 +29,8 @@ from .schemas import (
 from ..ingestion import OuraParser
 from ..automation import automator
 from ..llm import DataAnalyst
+from ..scheduling import FREQUENCIES, parse_time
+from ..widget_export import build_summary, export_widget_summary, write_summary
 
 # Logging
 logger = logging.getLogger("API")
@@ -53,6 +55,9 @@ class OTPRequest(BaseModel):
 class SettingsRequest(BaseModel):
     daily_sync_time: str
     email: Optional[str] = None
+    schedule_frequency: Optional[str] = None  # "daily" | "weekly"
+    schedule_weekday: Optional[int] = None  # 0 = Monday ... 6 = Sunday
+    widget_export_dir: Optional[str] = None  # "" = auto-detect
 
 class Dashboard(BaseModel):
     id: str
@@ -109,6 +114,7 @@ async def run_full_sync_task(db_session_factory):
                     parser = OuraParser(db)
                     parser.parse_zip(zip_path)
                     logger.info("Full sync: Ingestion complete.")
+                    export_widget_summary(db)
                     
                     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     config_manager.update_status("Idle", message="Sync and ingestion complete!", last_run=now_str)
@@ -204,6 +210,7 @@ async def download_export(db: Session = Depends(get_db)):
             # Ingest
             parser = OuraParser(db)
             parser.parse_zip(zip_path)
+            export_widget_summary(db)
             
             return {"message": "Download and ingestion successful!"}
     except HTTPException as he:
@@ -228,7 +235,21 @@ async def clear_session():
 async def save_settings(request: SettingsRequest):
     """Updates global application settings."""
     try:
-        updates = {"schedule_time": request.daily_sync_time}
+        parse_time(request.daily_sync_time)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="daily_sync_time must be HH:MM")
+    if request.schedule_frequency is not None and request.schedule_frequency not in FREQUENCIES:
+        raise HTTPException(status_code=400, detail=f"schedule_frequency must be one of {FREQUENCIES}")
+    if request.schedule_weekday is not None and not 0 <= request.schedule_weekday <= 6:
+        raise HTTPException(status_code=400, detail="schedule_weekday must be 0 (Mon) to 6 (Sun)")
+
+    try:
+        updates = {
+            "schedule_time": request.daily_sync_time,
+            "schedule_frequency": request.schedule_frequency,
+            "schedule_weekday": request.schedule_weekday,
+            "widget_export_dir": request.widget_export_dir,
+        }
         if request.email is not None:
              updates["email"] = request.email
              
@@ -244,8 +265,29 @@ async def get_settings():
         config = config_manager.get_config()
         return {
             "daily_sync_time": config.get("schedule_time", "09:00"),
+            "schedule_frequency": config.get("schedule_frequency", "daily"),
+            "schedule_weekday": config.get("schedule_weekday", 0),
+            "widget_export_dir": config.get("widget_export_dir", ""),
             "email": config.get("email", "")
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# -----------------------------------------------------------------------------
+# Home Screen Widget Endpoints
+# -----------------------------------------------------------------------------
+
+@router.get("/api/widget/summary")
+async def get_widget_summary(db: Session = Depends(get_db)):
+    """Returns the widget summary without writing it to disk."""
+    return build_summary(db)
+
+@router.post("/api/widget/export")
+async def export_widget(db: Session = Depends(get_db)):
+    """Writes oura_summary.json now (it is also written after every sync)."""
+    try:
+        path = write_summary(db)
+        return {"message": "Widget summary written", "path": str(path)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -539,6 +581,7 @@ async def ingest_zip(file: UploadFile = File(...), db: Session = Depends(get_db)
         
         parser.parse_zip(tmp_path)
         os.remove(tmp_path)
+        export_widget_summary(db)
         
         return {"message": "Ingestion successful"}
     except Exception as e:

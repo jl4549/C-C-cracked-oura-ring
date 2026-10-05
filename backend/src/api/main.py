@@ -10,6 +10,8 @@ from backend.src.automation import automator
 from backend.src.ingestion import OuraParser
 from backend.src.database import SessionLocal
 from backend.src.config import config_manager
+from backend.src.scheduling import Schedule
+from backend.src.widget_export import export_widget_summary
 import os
 from pydantic import BaseModel
 
@@ -318,7 +320,8 @@ async def process_ingestion(zip_path):
         parser = OuraParser(db)
         parser.parse_zip(zip_path)
         logger.info("Background worker: Ingestion successful.")
-        
+        export_widget_summary(db)
+
         # Success!
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         config_manager.update_status("Idle", last_run=now_str)
@@ -339,18 +342,13 @@ async def background_worker():
             cfg = config_manager.get_config()
             
             # Calculate next run time for display
-            schedule_time_str = cfg.get("schedule_time", "11:00")
             try:
-                sh, sm = map(int, schedule_time_str.split(":"))
-                run_today = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
-                if now > run_today:
-                    next_run = run_today + timedelta(days=1)
-                else:
-                    next_run = run_today
-                
+                schedule = Schedule.from_config(cfg)
+                next_run = schedule.next_run(now)
+
                 config_manager.update_status(cfg.get("status", "Idle"), next_run=next_run.strftime("%Y-%m-%d %H:%M:%S"))
 
-                if now.hour == sh and now.minute == sm:
+                if schedule.is_due(now):
                      await run_ingestion_task()
                 
                 # If in "Waiting" state, poll every 5 minutes            

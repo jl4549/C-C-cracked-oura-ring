@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { X, Loader2, AlertCircle, Download, Copy, Upload } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
@@ -13,6 +14,8 @@ interface SettingsPanelProps {
 
 type AutomationStatus = AutomationStatusResponse['status'];
 
+const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
     const [status, setStatus] = useState<AutomationStatus>('idle');
     const [email, setEmail] = useState('');
@@ -23,6 +26,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     const [activeTab, setActiveTab] = useState<'automation' | 'layout'>('automation');
 
     const [dailySyncTime, setDailySyncTime] = useState("09:00");
+    const [scheduleFrequency, setScheduleFrequency] = useState<'daily' | 'weekly'>('daily');
+    const [scheduleWeekday, setScheduleWeekday] = useState(0);
+    const [widgetExportDir, setWidgetExportDir] = useState("");
 
     useEffect(() => {
         // Fetch settings on mount
@@ -30,17 +36,30 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             .then(data => {
                 if (data.daily_sync_time) setDailySyncTime(data.daily_sync_time);
                 if (data.email) setEmail(data.email);
+                if (data.schedule_frequency) setScheduleFrequency(data.schedule_frequency);
+                if (typeof data.schedule_weekday === 'number') setScheduleWeekday(data.schedule_weekday);
+                if (data.widget_export_dir) setWidgetExportDir(data.widget_export_dir);
             })
             .catch(err => console.error("Failed to fetch settings", err));
     }, []);
+
+    const currentSettings = () => ({
+        daily_sync_time: dailySyncTime,
+        email,
+        schedule_frequency: scheduleFrequency,
+        schedule_weekday: scheduleWeekday,
+        widget_export_dir: widgetExportDir,
+    });
 
     const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
     const handleSaveSettings = async () => {
         setLoading(true);
         try {
-            await api.saveSettings({ daily_sync_time: dailySyncTime, email });
-            addLog(`Settings saved: Daily sync at ${dailySyncTime}`);
+            await api.saveSettings(currentSettings());
+            addLog(scheduleFrequency === 'weekly'
+                ? `Settings saved: Weekly sync on ${WEEKDAYS[scheduleWeekday]} at ${dailySyncTime}`
+                : `Settings saved: Daily sync at ${dailySyncTime}`);
         } catch (err: any) {
             setError(err.message);
         } finally {
@@ -69,7 +88,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         addLog(`Starting login for ${email}...`);
         try {
             // Auto-save settings to persist email
-            await api.saveSettings({ daily_sync_time: dailySyncTime, email });
+            await api.saveSettings(currentSettings());
 
             const data = await api.startLogin(email);
             addLog(data.message);
@@ -221,8 +240,35 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         <div className="space-y-4">
                             <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wider">Configuration</h3>
                             <div className="space-y-2">
-                                <Label>Daily Sync Time</Label>
+                                <Label>Sync Schedule</Label>
                                 <div className="flex gap-2">
+                                    <Select
+                                        value={scheduleFrequency}
+                                        onValueChange={(v: 'daily' | 'weekly') => setScheduleFrequency(v)}
+                                    >
+                                        <SelectTrigger className="w-[110px]">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="daily">Daily</SelectItem>
+                                            <SelectItem value="weekly">Weekly</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    {scheduleFrequency === 'weekly' && (
+                                        <Select
+                                            value={String(scheduleWeekday)}
+                                            onValueChange={v => setScheduleWeekday(Number(v))}
+                                        >
+                                            <SelectTrigger className="w-[130px]">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {WEEKDAYS.map((day, i) => (
+                                                    <SelectItem key={day} value={String(i)}>{day}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    )}
                                     <Input
                                         type="time"
                                         value={dailySyncTime}
@@ -232,6 +278,17 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                                         Save
                                     </Button>
                                 </div>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Widget Summary Folder</Label>
+                                <Input
+                                    placeholder="Auto: iCloud Drive › Scriptable (if found)"
+                                    value={widgetExportDir}
+                                    onChange={e => setWidgetExportDir(e.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    oura_summary.json is written here after each sync for the iPhone widget.
+                                </p>
                             </div>
                         </div>
 

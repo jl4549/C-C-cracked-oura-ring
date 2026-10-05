@@ -19,7 +19,13 @@ export const api = {
         return res.json();
     },
 
-    saveSettings: async (settings: { daily_sync_time: string; email?: string }) => {
+    saveSettings: async (settings: {
+        daily_sync_time: string;
+        email?: string;
+        schedule_frequency?: 'daily' | 'weekly';
+        schedule_weekday?: number;
+        widget_export_dir?: string;
+    }) => {
         const res = await fetch(`${BASE_URL}/api/settings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

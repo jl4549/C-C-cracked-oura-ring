@@ -32,6 +32,9 @@ class ConfigManager:
             default_config = {
                 "email": "",
                 "schedule_time": "11:00", # Default 11 AM
+                "schedule_frequency": "daily", # "daily" or "weekly"
+                "schedule_weekday": 0, # Weekly runs: 0 = Monday ... 6 = Sunday
+                "widget_export_dir": "", # Empty = auto-detect Scriptable iCloud folder
                 "last_run": None,
                 "next_run": None,
                 "status": "Idle",
